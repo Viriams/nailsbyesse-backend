@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "Nails By Esse <noreply@nailsbyesse.com>"
 
+    GMAIL_USER: str = ""
+    GMAIL_PASSWORD: str = ""
+    
     CLOUDINARY_CLOUD_NAME: str = ""
     CLOUDINARY_API_KEY: str = ""
     CLOUDINARY_API_SECRET: str = ""

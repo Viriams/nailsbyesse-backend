@@ -1,8 +1,8 @@
-import resend
+import aiosmtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from config import settings
 from datetime import date, time
-
-resend.api_key = settings.RESEND_API_KEY
 
 JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 MOIS  = ["janvier", "février", "mars", "avril", "mai", "juin",
@@ -31,10 +31,25 @@ def base_email(titre: str, contenu: str) -> str:
     </div>
     """
 
+async def send_email(to: str, subject: str, html: str):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"Nails By Esse <{settings.GMAIL_USER}>"
+    msg["To"]      = to
+    msg.attach(MIMEText(html, "html"))
+
+    await aiosmtplib.send(
+        msg,
+        hostname="smtp.gmail.com",
+        port=465,
+        use_tls=True,
+        username=settings.GMAIL_USER,
+        password=settings.GMAIL_PASSWORD,
+    )
+
 async def send_confirmation_email(reservation: dict):
-    """Email de confirmation envoyé à la cliente après réservation"""
-    date_str   = format_date(reservation['date'])
-    heure_str  = format_heure(reservation['heure_debut'])
+    date_str  = format_date(reservation['date'])
+    heure_str = format_heure(reservation['heure_debut'])
     cancel_url = f"{settings.FRONTEND_URL}/annuler/{reservation['token_annulation']}"
 
     contenu = f"""
@@ -61,17 +76,15 @@ async def send_confirmation_email(reservation: dict):
     </p>
     """
     try:
-        resend.Emails.send({
-            "from": settings.EMAIL_FROM,
-            "to": reservation['email'],
-            "subject": f"✅ Confirmation RDV — {date_str} à {heure_str}",
-            "html": base_email("Votre rendez-vous est confirmé !", contenu)
-        })
+        await send_email(
+            reservation['email'],
+            f"✅ Confirmation RDV — {date_str} à {heure_str}",
+            base_email("Votre rendez-vous est confirmé !", contenu)
+        )
     except Exception as e:
         print(f"Erreur email confirmation : {e}")
 
 async def send_rappel_email(reservation: dict):
-    """Rappel 24h avant le RDV"""
     date_str  = format_date(reservation['date'])
     heure_str = format_heure(reservation['heure_debut'])
     cancel_url = f"{settings.FRONTEND_URL}/annuler/{reservation['token_annulation']}"
@@ -96,17 +109,15 @@ async def send_rappel_email(reservation: dict):
     </p>
     """
     try:
-        resend.Emails.send({
-            "from": settings.EMAIL_FROM,
-            "to": reservation['email'],
-            "subject": f"⏰ Rappel RDV demain — {heure_str}",
-            "html": base_email("Rappel : votre rendez-vous est demain !", contenu)
-        })
+        await send_email(
+            reservation['email'],
+            f"⏰ Rappel RDV demain — {heure_str}",
+            base_email("Rappel : votre rendez-vous est demain !", contenu)
+        )
     except Exception as e:
         print(f"Erreur email rappel : {e}")
 
 async def send_annulation_email(reservation: dict):
-    """Email d'annulation"""
     date_str  = format_date(reservation['date'])
     heure_str = format_heure(reservation['heure_debut'])
 
@@ -125,17 +136,15 @@ async def send_annulation_email(reservation: dict):
     </p>
     """
     try:
-        resend.Emails.send({
-            "from": settings.EMAIL_FROM,
-            "to": reservation['email'],
-            "subject": "❌ Annulation de votre rendez-vous",
-            "html": base_email("Votre rendez-vous a été annulé", contenu)
-        })
+        await send_email(
+            reservation['email'],
+            "❌ Annulation de votre rendez-vous",
+            base_email("Votre rendez-vous a été annulé", contenu)
+        )
     except Exception as e:
         print(f"Erreur email annulation : {e}")
 
 async def send_notif_admin(reservation: dict):
-    """Notification à la gérante pour chaque nouvelle réservation"""
     date_str  = format_date(reservation['date'])
     heure_str = format_heure(reservation['heure_debut'])
 
@@ -148,16 +157,12 @@ async def send_notif_admin(reservation: dict):
       <p style="margin: 0.3rem 0; color: #f5f5f5;">📅 {date_str} à {heure_str}</p>
       <p style="margin: 0.3rem 0; color: #F9A825;">💅 {reservation['prestation_nom']} — {reservation['prestation_prix']:,} FCFA</p>
     </div>
-    <a href="{settings.FRONTEND_URL}/admin/reservations" style="background: #C2185B; color: white; padding: 0.6rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
-      Voir dans l'admin →
-    </a>
     """
     try:
-        resend.Emails.send({
-            "from": settings.EMAIL_FROM,
-            "to": settings.ADMIN_EMAIL,
-            "subject": f"🆕 Nouvelle réservation — {reservation['prenom']} {reservation['nom']}",
-            "html": base_email("Nouvelle réservation !", contenu)
-        })
+        await send_email(
+            settings.ADMIN_EMAIL,
+            f"🆕 Nouvelle réservation — {reservation['prenom']} {reservation['nom']}",
+            base_email("Nouvelle réservation !", contenu)
+        )
     except Exception as e:
         print(f"Erreur notif admin : {e}")

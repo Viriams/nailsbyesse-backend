@@ -61,6 +61,17 @@ async def init_db():
             )
         """)
 
+#table jours_bloques
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jours_bloques (
+                id SERIAL PRIMARY KEY,
+                date DATE UNIQUE NOT NULL,
+                motif VARCHAR(200),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+
         # Table réservations
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS reservations (

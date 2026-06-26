@@ -170,26 +170,48 @@ async def delete_prestation(id: int, admin=Depends(get_current_admin)):
 
 @app.get("/api/disponibilites/{date_str}")
 async def get_disponibilites(date_str: str):
-    """Retourne les créneaux disponibles pour une date donnée (public)"""
     try:
         d = date.fromisoformat(date_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Format de date invalide (YYYY-MM-DD)")
 
+    # Pas de RDV le dimanche
+    if d.weekday() == 6:
+        return {"date": date_str, "creneaux": []}
+
+    # Créneaux fixes de 3h : 9h-12h, 12h-15h, 15h-18h
+    CRENEAUX = [
+        {"heure_debut": "09:00", "heure_fin": "12:00"},
+        {"heure_debut": "12:00", "heure_fin": "15:00"},
+        {"heure_debut": "15:00", "heure_fin": "18:00"},
+        {"heure_debut": "18:00", "heure_fin": "21:00"},
+
+    ]
+
     conn = await get_conn()
     try:
-        # Créneaux ouverts et non bloqués
-        slots = await conn.fetch("""
-            SELECT d.* FROM disponibilites d
-            WHERE d.date=$1 AND d.bloque=FALSE
-            AND NOT EXISTS (
-                SELECT 1 FROM reservations r
-                WHERE r.date=$1 AND r.heure_debut=d.heure_debut
-                AND r.statut != 'annule'
-            )
-            ORDER BY d.heure_debut
+        # Récupérer les jours bloqués par l'admin
+        bloque = await conn.fetchrow(
+            "SELECT * FROM jours_bloques WHERE date=$1", d
+        )
+        if bloque:
+            return {"date": date_str, "creneaux": []}
+
+        # Récupérer les réservations existantes
+        reservations = await conn.fetch("""
+            SELECT heure_debut FROM reservations
+            WHERE date=$1 AND statut != 'annule'
         """, d)
-        return {"date": date_str, "creneaux": [dict(s) for s in slots]}
+
+        heures_prises = {str(r['heure_debut'])[:5] for r in reservations}
+
+        # Filtrer les créneaux libres
+        creneaux_libres = [
+            c for c in CRENEAUX
+            if c['heure_debut'] not in heures_prises
+        ]
+
+        return {"date": date_str, "creneaux": creneaux_libres}
     finally:
         await release_conn(conn)
 
@@ -208,23 +230,33 @@ async def create_disponibilite(data: DisponibiliteSchema, admin=Depends(get_curr
     finally:
         await release_conn(conn)
 
-@app.get("/api/admin/disponibilites")
-async def get_all_disponibilites(admin=Depends(get_current_admin)):
+@app.get("/api/admin/jours-bloques")
+async def get_jours_bloques(admin=Depends(get_current_admin)):
     conn = await get_conn()
     try:
-        rows = await conn.fetch("""
-            SELECT * FROM disponibilites ORDER BY date, heure_debut
-        """)
+        rows = await conn.fetch("SELECT * FROM jours_bloques ORDER BY date")
         return [dict(r) for r in rows]
     finally:
         await release_conn(conn)
 
-@app.delete("/api/admin/disponibilites/{id}")
-async def delete_disponibilite(id: int, admin=Depends(get_current_admin)):
+@app.post("/api/admin/jours-bloques")
+async def bloquer_jour(date_str: str, motif: str = "", admin=Depends(get_current_admin)):
     conn = await get_conn()
     try:
-        await conn.execute("DELETE FROM disponibilites WHERE id=$1", id)
-        return {"message": "Créneau supprimé"}
+        await conn.execute("""
+            INSERT INTO jours_bloques (date, motif)
+            VALUES ($1, $2) ON CONFLICT (date) DO NOTHING
+        """, date.fromisoformat(date_str), motif)
+        return {"message": "Jour bloqué"}
+    finally:
+        await release_conn(conn)
+
+@app.delete("/api/admin/jours-bloques/{id}")
+async def debloquer_jour(id: int, admin=Depends(get_current_admin)):
+    conn = await get_conn()
+    try:
+        await conn.execute("DELETE FROM jours_bloques WHERE id=$1", id)
+        return {"message": "Jour débloqué"}
     finally:
         await release_conn(conn)
 
