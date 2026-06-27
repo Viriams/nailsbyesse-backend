@@ -1,29 +1,18 @@
 import asyncpg
 from config import settings
 
-_pool = None
-
-async def get_pool():
-    global _pool
-    if _pool is None:
-        url = settings.DATABASE_URL
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
-        _pool = await asyncpg.create_pool(url, min_size=1, max_size=10)
-    return _pool
-
 async def get_conn():
-    pool = await get_pool()
-    return await pool.acquire()
+    url = settings.DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return await asyncpg.connect(url)
 
 async def release_conn(conn):
-    pool = await get_pool()
-    await pool.release(conn)
+    await conn.close()
 
 async def init_db():
     conn = await get_conn()
     try:
-        # Table admin
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 id SERIAL PRIMARY KEY,
@@ -32,8 +21,6 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-
-        # Table prestations
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS prestations (
                 id SERIAL PRIMARY KEY,
@@ -46,8 +33,6 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-
-        # Table disponibilités (créneaux ouverts par la gérante)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS disponibilites (
                 id SERIAL PRIMARY KEY,
@@ -60,8 +45,6 @@ async def init_db():
                 UNIQUE(date, heure_debut)
             )
         """)
-
-#table jours_bloques
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS jours_bloques (
                 id SERIAL PRIMARY KEY,
@@ -70,9 +53,6 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-
-
-        # Table réservations
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS reservations (
                 id SERIAL PRIMARY KEY,
@@ -95,8 +75,6 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         """)
-
-        # Table galerie
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS galerie (
                 id SERIAL PRIMARY KEY,
@@ -109,19 +87,15 @@ async def init_db():
             )
         """)
 
-        # Insérer les prestations officielles si la table est vide
         count = await conn.fetchval("SELECT COUNT(*) FROM prestations")
         if count == 0:
             prestations = [
-                # Pose semi-permanente
                 ("Pose semi-permanente", "French simple", 2500, None, 1),
                 ("Pose semi-permanente", "Nail art +", 4000, None, 2),
                 ("Pose semi-permanente", "Nail art ++", 5000, None, 3),
-                # Pose américaine
                 ("Pose américaine", "French simple", 3000, None, 4),
                 ("Pose américaine", "Nail art +", 4500, None, 5),
                 ("Pose américaine", "Nail art ++", 5500, None, 6),
-                # Autres services
                 ("Autres services", "Pose en Poly gel", 6000, None, 7),
                 ("Autres services", "Pose gel", 7000, None, 8),
                 ("Autres services", "Dépose", 2000, None, 9),
@@ -136,4 +110,4 @@ async def init_db():
 
         print("✅ Base de données initialisée avec succès")
     finally:
-        await release_conn(conn)
+        await conn.close()

@@ -268,13 +268,30 @@ async def debloquer_jour(id: int, admin=Depends(get_current_admin)):
 async def create_reservation(data: ReservationSchema, background_tasks: BackgroundTasks):
     conn = await get_conn()
     try:
-        # Vérifier que le créneau est disponible
-        dispo = await conn.fetchrow("""
-            SELECT * FROM disponibilites
-            WHERE date=$1 AND heure_debut=$2 AND bloque=FALSE
-        """, data.date, data.heure_debut)
-        if not dispo:
-            raise HTTPException(status_code=400, detail="Ce créneau n'est plus disponible")
+        # Créneaux fixes
+        CRENEAUX = {
+            "09:00": "12:00",
+            "12:00": "15:00",
+            "15:00": "18:00",
+            "18:00": "21:00",
+        }
+
+        heure_str = data.heure_debut.strftime("%H:%M")
+
+        # Vérifier que l'heure est un créneau valide
+        if heure_str not in CRENEAUX:
+            raise HTTPException(status_code=400, detail="Créneau invalide")
+
+        # Pas de RDV le dimanche
+        if data.date.weekday() == 6:
+            raise HTTPException(status_code=400, detail="Fermé le dimanche")
+
+        # Vérifier jour bloqué
+        bloque = await conn.fetchrow(
+            "SELECT * FROM jours_bloques WHERE date=$1", data.date
+        )
+        if bloque:
+            raise HTTPException(status_code=400, detail="Ce jour n'est pas disponible")
 
         # Vérifier qu'il n'y a pas déjà une réservation
         existing = await conn.fetchrow("""
@@ -289,6 +306,10 @@ async def create_reservation(data: ReservationSchema, background_tasks: Backgrou
         if not prestation:
             raise HTTPException(status_code=404, detail="Prestation introuvable")
 
+        # Calculer heure_fin
+        heure_fin_str = CRENEAUX[heure_str]
+        heure_fin = time.fromisoformat(heure_fin_str)
+
         # Créer la réservation
         token = secrets.token_urlsafe(32)
         row = await conn.fetchrow("""
@@ -298,7 +319,7 @@ async def create_reservation(data: ReservationSchema, background_tasks: Backgrou
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             RETURNING *
         """, token, data.nom, data.prenom, data.email, data.telephone,
-            data.date, data.heure_debut, dispo['heure_fin'],
+            data.date, data.heure_debut, heure_fin,
             data.prestation_id, prestation['nom'], prestation['prix'],
             data.consentement_photo, data.notes)
 
@@ -335,6 +356,15 @@ async def annuler_reservation(token: str, background_tasks: BackgroundTasks):
 
         background_tasks.add_task(send_annulation_email, dict(reservation))
         return {"message": "Votre réservation a été annulée avec succès"}
+    finally:
+        await release_conn(conn)
+
+@app.delete("/api/admin/reservations/{id}")
+async def delete_reservation(id: int, admin=Depends(get_current_admin)):
+    conn = await get_conn()
+    try:
+        await conn.execute("DELETE FROM reservations WHERE id=$1", id)
+        return {"message": "Réservation supprimée"}
     finally:
         await release_conn(conn)
 
